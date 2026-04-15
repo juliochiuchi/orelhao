@@ -121,7 +121,7 @@ export function ChatView(props: {
               }
             }}
             placeholder="Escreva uma mensagem…"
-            className="h-12 bg-neutral-950/60"
+            className="h-12 bg-neutral-950/60 text-neutral-50 caret-neutral-50 placeholder:text-neutral-400"
           />
           <Button type="button" onClick={() => onSend().catch(() => undefined)} className="h-12">
             <SendHorizonal />

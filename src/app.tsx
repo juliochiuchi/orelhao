@@ -15,9 +15,11 @@ type Session = {
 export const App = () => {
   const myId = useClientId()
   const [session, setSession] = useState<Session | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [loadingLabel, setLoadingLabel] = useState<string | undefined>(undefined)
 
   return (
-    <AppShell>
+    <AppShell loading={session ? loading : false} loadingLabel={session ? loadingLabel : undefined}>
       {session ? (
         <ChatView
           roomCode={session.roomCode}
@@ -25,10 +27,24 @@ export const App = () => {
           myId={myId}
           roomKey={session.key}
           invite={session.invite}
-          onLeave={() => setSession(null)}
+          onStatusChange={status => {
+            if (status === "connected" || status === "error") setLoading(false)
+            if (status === "connecting") setLoading(true)
+          }}
+          onLeave={() => {
+            setLoading(false)
+            setLoadingLabel(undefined)
+            setSession(null)
+          }}
         />
       ) : (
-        <Home onConnected={s => setSession(s)} />
+        <Home
+          onConnected={s => {
+            setLoadingLabel("Entrando na sala…")
+            setLoading(true)
+            setSession(s)
+          }}
+        />
       )}
     </AppShell>
   )

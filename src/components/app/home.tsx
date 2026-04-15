@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Loading } from "@/components/ui/loading"
 import { Separator } from "@/components/ui/separator"
 import * as roomsController from "@/controllers/rooms.controller"
 import { cn } from "@/lib/utils"
@@ -41,7 +42,7 @@ export function Home(props: {
 
   const createForm = useForm<CreateForm, undefined, CreateForm>({
     resolver: zodResolver<CreateForm, undefined, CreateForm>(CreateSchema),
-    defaultValues: { name: "", expireInHours: 24 },
+    defaultValues: { name: "", expireInHours: 9 },
   })
   const joinForm = useForm<JoinForm, undefined, JoinForm>({
     resolver: zodResolver<JoinForm, undefined, JoinForm>(JoinSchema),
@@ -74,15 +75,34 @@ export function Home(props: {
     setError(null)
     try {
       const res = await roomsController.joinRoom({ invite: values.invite })
-      if (!res.ok) {
-        if (res.reason === "INVALID_INVITE")
-          setError("Código de acesso inválido. Use o formato ROOMCODE.SECRET (ou cole exatamente como recebeu).")
-        if (res.reason === "ROOM_NOT_FOUND") setError("Sala não encontrada.")
-        if (res.reason === "ROOM_EXPIRED") setError("Essa sala expirou.")
-        if (res.reason === "INVALID_SECRET") setError("Código de acesso inválido.")
+      if (res.ok) {
+        props.onConnected({ roomCode: res.roomCode, myName: values.name, key: res.key, invite: values.invite })
         return
       }
-      props.onConnected({ roomCode: res.roomCode, myName: values.name, key: res.key, invite: values.invite })
+
+      if (!("reason" in res)) {
+        setError("Falha ao entrar na sala.")
+        return
+      }
+
+      switch (res.reason) {
+        case "INVALID_INVITE":
+          setError(
+            "Código de acesso inválido. Use o formato ROOMCODE.SECRET (ou cole exatamente como recebeu).",
+          )
+          break
+        case "ROOM_NOT_FOUND":
+          setError("Sala não encontrada.")
+          break
+        case "ROOM_EXPIRED":
+          setError("Essa sala expirou.")
+          break
+        case "INVALID_SECRET":
+          setError("Código de acesso inválido.")
+          break
+        default:
+          setError("Falha ao entrar na sala.")
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao entrar na sala")
     } finally {
@@ -144,6 +164,7 @@ export function Home(props: {
               variant={tab === "create" ? "default" : "secondary"}
               className="flex-1"
               onClick={() => setTab("create")}
+              disabled={busy}
             >
               Criar sala
             </Button>
@@ -152,6 +173,7 @@ export function Home(props: {
               variant={tab === "join" ? "default" : "secondary"}
               className="flex-1"
               onClick={() => setTab("join")}
+              disabled={busy}
             >
               Entrar
             </Button>
@@ -173,7 +195,7 @@ export function Home(props: {
               <div className="space-y-2">
                 <Label>Como você quer ser chamado?</Label>
                 <Input
-                  placeholder="Ex: Júlio"
+                  placeholder="Ex: Julio"
                   autoComplete="nickname"
                   {...createForm.register("name")}
                 />
@@ -197,7 +219,7 @@ export function Home(props: {
               </div>
 
               <Button type="submit" className={cn("w-full", busy && "opacity-70")} disabled={busy}>
-                Criar e entrar
+                {busy ? <Loading size="sm" label="Criando sala…" /> : "Criar e entrar"}
               </Button>
             </form>
           ) : (
@@ -207,7 +229,7 @@ export function Home(props: {
             >
               <div className="space-y-2">
                 <Label>Como você quer ser chamado?</Label>
-                <Input placeholder="Ex: Ana" autoComplete="nickname" {...joinForm.register("name")} />
+                <Input placeholder="Ex: Thaís" autoComplete="nickname" {...joinForm.register("name")} />
                 {joinForm.formState.errors.name ? (
                   <div className="text-xs text-red-200">{joinForm.formState.errors.name.message}</div>
                 ) : null}
@@ -222,7 +244,7 @@ export function Home(props: {
               </div>
 
               <Button type="submit" className={cn("w-full", busy && "opacity-70")} disabled={busy}>
-                Entrar na sala
+                {busy ? <Loading size="sm" label="Entrando…" /> : "Entrar na sala"}
               </Button>
             </form>
           )}

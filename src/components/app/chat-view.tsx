@@ -16,8 +16,11 @@ export function ChatView(props: {
   myId: string
   roomKey: CryptoKey
   invite?: string
+  onStatusChange?: (status: "idle" | "connecting" | "connected" | "error") => void
   onLeave: () => void
 }) {
+  const onStatusChange = props.onStatusChange
+
   const { status, messages, sendMessage, leave } = useE2EEChat({
     roomCode: props.roomCode,
     key: props.roomKey,
@@ -34,6 +37,10 @@ export function ChatView(props: {
     if (status === "error") return "Erro"
     return "Offline"
   }, [status])
+
+  useEffect(() => {
+    onStatusChange?.(status)
+  }, [onStatusChange, status])
 
   useEffect(() => {
     const el = scrollerRef.current

@@ -19,7 +19,12 @@ export const App = () => {
   const [loadingLabel, setLoadingLabel] = useState<string | undefined>(undefined)
 
   return (
-    <AppShell loading={session ? loading : false} loadingLabel={session ? loadingLabel : undefined}>
+    <AppShell
+      shellClassName={session ? "h-dvh overflow-hidden" : undefined}
+      className={session ? "overflow-hidden" : undefined}
+      loading={session ? loading : false}
+      loadingLabel={session ? loadingLabel : undefined}
+    >
       {session ? (
         <ChatView
           roomCode={session.roomCode}

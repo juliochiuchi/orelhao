@@ -59,7 +59,7 @@ export function ChatView(props: {
   }
 
   return (
-    <Card className="border-white/10 bg-neutral-950/50 backdrop-blur">
+    <Card className="flex h-full flex-col border-white/10 bg-neutral-950/50 backdrop-blur">
       <CardHeader className="pb-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -92,10 +92,14 @@ export function ChatView(props: {
         </div>
       </CardHeader>
       <Separator className="bg-white/10" />
-      <CardContent className="flex h-[70dvh] flex-col gap-4 pt-6">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4 pt-6">
         <div
           ref={scrollerRef}
-          className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-4"
+          style={{
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(115,115,115,0.85) rgba(58, 58, 58, 0.6)",
+          }}
+          className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-neutral-950/60 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-500/80 [&::-webkit-scrollbar-thumb]:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)] [&::-webkit-scrollbar-thumb:hover]:bg-neutral-400/85"
         >
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-neutral-400">

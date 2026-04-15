@@ -154,7 +154,7 @@ export function Home(props: {
             Começar
           </CardTitle>
           <CardDescription className="text-neutral-300">
-            Crie uma sala efêmera ou entre com um código de acesso.
+            Crie uma sala ou entre com um código de acesso.
           </CardDescription>
         </CardHeader>
         <CardContent>

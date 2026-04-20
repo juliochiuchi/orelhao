@@ -3,6 +3,7 @@ import { LogOut, SendHorizonal, Shield } from "lucide-react"
 
 import { CopyField } from "@/components/app/copy-field"
 import { MessageBubble } from "@/components/app/message-bubble"
+import { TypingIndicator } from "@/components/app/typing-indicator"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,7 +22,7 @@ export function ChatView(props: {
 }) {
   const onStatusChange = props.onStatusChange
 
-  const { status, messages, sendMessage, leave } = useE2EEChat({
+  const { status, messages, typingUsers, sendMessage, notifyTypingActivity, stopTyping, leave } = useE2EEChat({
     roomCode: props.roomCode,
     key: props.roomKey,
     myId: props.myId,
@@ -110,23 +111,30 @@ export function ChatView(props: {
           )}
         </div>
 
-        <div className="flex items-end gap-2">
-          <Input
-            value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault()
-                onSend().catch(() => undefined)
-              }
-            }}
-            placeholder="Escreva uma mensagem…"
-            className="h-12 bg-neutral-950/60 text-neutral-50 caret-neutral-50 placeholder:text-neutral-400"
-          />
-          <Button type="button" onClick={() => onSend().catch(() => undefined)} className="h-12">
-            <SendHorizonal />
-            Enviar
-          </Button>
+        <div className="space-y-2">
+          <TypingIndicator users={typingUsers} />
+          <div className="flex items-end gap-2">
+            <Input
+              value={text}
+              onChange={e => {
+                setText(e.target.value)
+                notifyTypingActivity()
+              }}
+              onBlur={() => stopTyping()}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  onSend().catch(() => undefined)
+                }
+              }}
+              placeholder="Escreva uma mensagem…"
+              className="h-12 bg-neutral-950/60 text-neutral-50 caret-neutral-50 placeholder:text-neutral-400"
+            />
+            <Button type="button" onClick={() => onSend().catch(() => undefined)} className="h-12">
+              <SendHorizonal />
+              Enviar
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

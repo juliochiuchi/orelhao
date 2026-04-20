@@ -10,3 +10,14 @@ export type ChatMessage = ChatPlainMessage & {
   mine: boolean
 }
 
+export type ChatTypingPayload = {
+  senderId: string
+  senderName: string
+  isTyping: boolean
+  sentAt: number
+}
+
+export type TypingUser = {
+  senderId: string
+  senderName: string
+}

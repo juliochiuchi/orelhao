@@ -195,7 +195,7 @@ export function Home(props: {
               <div className="space-y-2">
                 <Label>Como você quer ser chamado?</Label>
                 <Input
-                  placeholder="Ex: Julio"
+                  placeholder="digite o seu nome ou apelido"
                   autoComplete="nickname"
                   {...createForm.register("name")}
                 />
@@ -229,7 +229,7 @@ export function Home(props: {
             >
               <div className="space-y-2">
                 <Label>Como você quer ser chamado?</Label>
-                <Input placeholder="Ex: Thaís" autoComplete="nickname" {...joinForm.register("name")} />
+                <Input placeholder="digite o seu nome ou apelido" autoComplete="nickname" {...joinForm.register("name")} />
                 {joinForm.formState.errors.name ? (
                   <div className="text-xs text-red-200">{joinForm.formState.errors.name.message}</div>
                 ) : null}

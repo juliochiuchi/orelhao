@@ -111,7 +111,7 @@ export function Home(props: {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
+    <div className="grid gap-4 md:gap-6 md:grid-cols-2">
       <Card className="border-white/10 bg-neutral-950/50 backdrop-blur">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-2xl">

@@ -20,7 +20,7 @@ export function AppShell(props: {
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.04),transparent_25%,transparent_75%,rgba(255,255,255,0.03)),radial-gradient(55rem_40rem_at_10%_15%,rgba(255,255,255,0.05),transparent_60%),radial-gradient(50rem_35rem_at_100%_0%,rgba(255,255,255,0.035),transparent_60%)]" />
       <div
         className={cn(
-          "relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 py-10",
+          "relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-3 md:px-4 py-3 md:py-10",
           props.className,
         )}
       >

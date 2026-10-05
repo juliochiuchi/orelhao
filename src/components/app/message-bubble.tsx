@@ -117,34 +117,34 @@ export function MessageBubble(props: {
     <div className={cn("flex w-full", m.mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ring-1",
+          "max-w-[92%] md:max-w-[85%] rounded-2xl px-3 md:px-4 py-2.5 md:py-3 shadow-sm ring-1",
           m.mine
             ? "bg-neutral-50 text-neutral-950 ring-neutral-200"
             : "bg-neutral-900/70 text-neutral-50 ring-white/10",
         )}
       >
-        <div className="flex items-baseline justify-between gap-3">
-          <div className={cn("truncate text-xs font-medium", m.mine ? "text-neutral-700" : "text-neutral-300")}>
+        <div className="flex items-baseline justify-between gap-2 md:gap-3">
+          <div className={cn("truncate text-[11px] md:text-xs font-medium", m.mine ? "text-neutral-700" : "text-neutral-300")}>
             {m.mine ? "Você" : m.senderName}
           </div>
-          <div className={cn("shrink-0 text-[11px]", m.mine ? "text-neutral-500" : "text-neutral-400")}>
+          <div className={cn("shrink-0 text-[10px] md:text-[11px]", m.mine ? "text-neutral-500" : "text-neutral-400")}>
             {time}
           </div>
         </div>
 
         {m.type === "text" ? (
-          <div className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-relaxed">{m.text}</div>
+          <div className="mt-0.5 md:mt-1 whitespace-pre-wrap break-words text-[15px] md:text-[15px] leading-relaxed">{m.text}</div>
         ) : (
-          <div className="mt-2 space-y-2">
+          <div className="mt-1.5 md:mt-2 space-y-2">
             <div className="relative overflow-hidden rounded-xl bg-black/10 ring-1 ring-black/5">
               {imageState === "loading" && (
-                <div className="flex h-40 w-64 max-w-full items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400">
+                <div className="flex h-32 md:h-40 w-56 md:w-64 max-w-full items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400">
                   <Loader2 className="size-4 animate-spin" />
                   <span className="text-xs">Carregando…</span>
                 </div>
               )}
               {imageState === "error" && (
-                <div className="flex h-40 w-64 max-w-full flex-col items-center justify-center gap-1 px-3 text-center">
+                <div className="flex h-32 md:h-40 w-56 md:w-64 max-w-full flex-col items-center justify-center gap-1 px-3 text-center">
                   <AlertCircle className={cn("size-5", m.mine ? "text-neutral-600" : "text-neutral-400")} />
                   <span className={cn("text-xs", m.mine ? "text-neutral-600" : "text-neutral-400")}>
                     Falha ao carregar imagem
@@ -155,12 +155,12 @@ export function MessageBubble(props: {
                 <button
                   type="button"
                   onClick={() => setLightboxOpen(true)}
-                  className="group relative block max-w-[280px] cursor-zoom-in overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
+                  className="group relative block max-w-[240px] md:max-w-[280px] cursor-zoom-in overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
                 >
                   <img
                     src={objectUrl}
                     alt={m.image.fileName || "Imagem"}
-                    className="block h-auto max-h-[360px] w-full object-cover"
+                    className="block h-auto max-h-[280px] md:max-h-[360px] w-full object-cover"
                     loading="lazy"
                   />
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/20 group-hover:opacity-100">
@@ -192,7 +192,7 @@ export function MessageBubble(props: {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 md:p-4 backdrop-blur-sm"
           onClick={() => setLightboxOpen(false)}
         >
           <button
@@ -202,7 +202,7 @@ export function MessageBubble(props: {
               e.stopPropagation()
               setLightboxOpen(false)
             }}
-            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+            className="absolute right-3 md:right-4 top-[calc(env(safe-area-inset-top)+12px)] md:top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           >
             <X className="size-5" />
           </button>
@@ -210,7 +210,7 @@ export function MessageBubble(props: {
             <img
               src={objectUrl}
               alt={m.type === "image" ? m.image.fileName || "Imagem" : "Imagem"}
-              className="block max-h-[85vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl ring-1 ring-white/10"
+              className="block max-h-[88vh] max-w-[96vw] md:max-h-[85vh] md:max-w-[92vw] rounded-2xl object-contain shadow-2xl ring-1 ring-white/10"
             />
           </div>
         </div>

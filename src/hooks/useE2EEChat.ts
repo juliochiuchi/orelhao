@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { decrypt, encrypt, type EncryptedPayload } from "@/crypto"
+import { compressImage, decryptBlob, encryptBlob } from "@/lib/image"
 import { randomId } from "@/lib/random"
 import { supabase } from "@/supabase"
-import type { ChatMessage, ChatPlainMessage, ChatTypingPayload, TypingUser } from "@/types/chat"
+import type {
+  ChatLocalMessage,
+  ChatMessage,
+  ChatPlainImageMessage,
+  ChatPlainMessage,
+  ChatTypingPayload,
+  TypingUser,
+} from "@/types/chat"
 
 type Status = "idle" | "connecting" | "connected" | "error"
+
+const STORAGE_BUCKET = "chat-images"
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 export function useE2EEChat(params: {
   roomCode: string
@@ -51,7 +62,7 @@ export function useE2EEChat(params: {
   }, [syncTypingState])
 
   const appendMessage = useCallback(
-    (plain: ChatPlainMessage) => {
+    (plain: ChatLocalMessage) => {
       if (seenRef.current.has(plain.id)) return
       seenRef.current.add(plain.id)
       setMessages(prev => [
@@ -64,6 +75,19 @@ export function useE2EEChat(params: {
     },
     [params.myId],
   )
+
+  const removeMessage = useCallback((id: string) => {
+    setMessages(prev => prev.filter(m => m.id !== id))
+    seenRef.current.delete(id)
+  }, [])
+
+  const setMessageUploadError = useCallback((id: string) => {
+    setMessages(prev =>
+      prev.map(m =>
+        m.id === id ? { ...m, uploadStatus: "error" } : m,
+      ),
+    )
+  }, [])
 
   const sendTyping = useCallback(
     async (isTyping: boolean) => {
@@ -115,6 +139,20 @@ export function useE2EEChat(params: {
     sendTyping(false).catch(() => undefined)
   }, [sendTyping])
 
+  const broadcastPayload = useCallback(
+    async (plain: ChatPlainMessage) => {
+      const channel = channelRef.current
+      if (!channel) return
+      const payload = await encrypt(params.key, JSON.stringify(plain))
+      await channel.send({
+        type: "broadcast",
+        event: "message",
+        payload,
+      })
+    },
+    [params.key],
+  )
+
   useEffect(() => {
     let active = true
     Promise.resolve().then(() => {
@@ -129,10 +167,43 @@ export function useE2EEChat(params: {
     channel.on("broadcast", { event: "message" }, async ({ payload }) => {
       try {
         const text = await decrypt(params.key, payload as EncryptedPayload)
-        const parsed = JSON.parse(text) as ChatPlainMessage
+        const parsed = JSON.parse(text) as ChatPlainMessage & { text?: string }
         if (!active) return
-        if (!parsed?.id || !parsed?.senderId || typeof parsed.text !== "string") return
-        appendMessage(parsed)
+        if (!parsed?.id || !parsed?.senderId) return
+
+        const type: "text" | "image" = parsed.type === "image" ? "image" : "text"
+
+        if (type === "text") {
+          const msgText = typeof parsed.text === "string" ? parsed.text : ""
+          const normalized: ChatPlainMessage = {
+            id: parsed.id,
+            senderId: parsed.senderId,
+            senderName: parsed.senderName ?? "Anônimo",
+            sentAt: parsed.sentAt ?? Date.now(),
+            type: "text",
+            text: msgText,
+          }
+          appendMessage(normalized)
+        } else {
+          const img = (parsed as ChatPlainImageMessage).image
+          if (!img || typeof img.storageKey !== "string" || typeof img.iv !== "string") return
+          if (typeof img.mimeType !== "string" || typeof img.size !== "number") return
+          const normalized: ChatPlainImageMessage = {
+            id: parsed.id,
+            senderId: parsed.senderId,
+            senderName: parsed.senderName ?? "Anônimo",
+            sentAt: parsed.sentAt ?? Date.now(),
+            type: "image",
+            image: {
+              storageKey: img.storageKey,
+              iv: img.iv,
+              mimeType: img.mimeType,
+              size: img.size,
+              fileName: img.fileName,
+            },
+          }
+          appendMessage(normalized)
+        }
       } catch {
         if (!active) return
       }
@@ -205,19 +276,95 @@ export function useE2EEChat(params: {
         senderName: params.myName,
         text: trimmed,
         sentAt: Date.now(),
+        type: "text",
       }
 
       appendMessage(plain)
       stopTyping()
-
-      const payload = await encrypt(params.key, JSON.stringify(plain))
-      await channel.send({
-        type: "broadcast",
-        event: "message",
-        payload,
-      })
+      try {
+        await broadcastPayload(plain)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Falha ao enviar mensagem"
+        setError(message)
+        setTimeout(() => setError(prev => (prev === message ? null : prev)), 4000)
+      }
     },
-    [appendMessage, params.key, params.myId, params.myName, stopTyping],
+    [appendMessage, broadcastPayload, params.myId, params.myName, stopTyping],
+  )
+
+  const sendImage = useCallback(
+    async (file: File): Promise<void> => {
+      const channel = channelRef.current
+      if (!channel) throw new Error("Canal desconectado")
+      if (file.size > MAX_IMAGE_BYTES) {
+        throw new Error(`Imagem muito grande (${(file.size / 1024 / 1024).toFixed(2)}MB). Limite: 5MB.`)
+      }
+
+      const preparedBlob = await compressImage(file)
+      if (preparedBlob.size > MAX_IMAGE_BYTES) {
+        throw new Error(`Imagem continua muito grande após compressão (${(preparedBlob.size / 1024 / 1024).toFixed(2)}MB).`)
+      }
+
+      const { encrypted, iv } = await encryptBlob(params.key, preparedBlob)
+      const storageId = randomId()
+      const storageKey = `${params.roomCode}/${storageId}.enc`
+
+      const optimisticId = randomId()
+      const localObjectUrl = URL.createObjectURL(preparedBlob)
+      const optimistic: ChatLocalMessage = {
+        id: optimisticId,
+        senderId: params.myId,
+        senderName: params.myName,
+        sentAt: Date.now(),
+        type: "image",
+        image: {
+          storageKey,
+          iv,
+          mimeType: preparedBlob.type || file.type || "image/jpeg",
+          size: preparedBlob.size,
+          fileName: file.name,
+        },
+        localObjectUrl,
+        uploadStatus: "pending",
+      }
+
+      appendMessage(optimistic)
+      stopTyping()
+
+      try {
+        const { error: uploadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(storageKey, new Blob([encrypted], { type: "application/octet-stream" }))
+        if (uploadError) throw uploadError
+
+        const finalMessage: ChatPlainImageMessage = {
+          id: optimisticId,
+          senderId: params.myId,
+          senderName: params.myName,
+          sentAt: Date.now(),
+          type: "image",
+          image: optimistic.image,
+        }
+
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === optimisticId ? { ...m, uploadStatus: undefined } : m,
+          ),
+        )
+
+        await broadcastPayload(finalMessage)
+      } catch (err) {
+        URL.revokeObjectURL(localObjectUrl)
+        const message = err instanceof Error ? err.message : "Falha ao enviar imagem"
+        setMessageUploadError(optimisticId)
+        setError(message)
+        setTimeout(() => {
+          removeMessage(optimisticId)
+          setError(prev => (prev === message ? null : prev))
+        }, 4000)
+      }
+    },
+    [appendMessage, broadcastPayload, params.key, params.myId, params.myName, params.roomCode, removeMessage, setMessageUploadError, stopTyping],
   )
 
   const leave = useCallback(async () => {
@@ -231,5 +378,18 @@ export function useE2EEChat(params: {
     typingRef.current = new Map()
   }, [stopTyping])
 
-  return { status, messages, typingUsers, error, sendMessage, notifyTypingActivity, stopTyping, leave }
+  return {
+    status,
+    messages,
+    typingUsers,
+    error,
+    sendMessage,
+    sendImage,
+    notifyTypingActivity,
+    stopTyping,
+    leave,
+    decryptBlob,
+    storageBucket: STORAGE_BUCKET,
+    roomKey: params.key,
+  }
 }

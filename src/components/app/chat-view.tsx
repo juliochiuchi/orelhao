@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { LogOut, SendHorizonal, Shield } from "lucide-react"
+import { ImagePlus, LogOut, SendHorizonal, Shield } from "lucide-react"
 
 import { CopyField } from "@/components/app/copy-field"
 import { MessageBubble } from "@/components/app/message-bubble"
@@ -10,6 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { useE2EEChat } from "@/hooks/useE2EEChat"
+import { cn } from "@/lib/utils"
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 export function ChatView(props: {
   roomCode: string
@@ -22,7 +25,18 @@ export function ChatView(props: {
 }) {
   const onStatusChange = props.onStatusChange
 
-  const { status, messages, typingUsers, sendMessage, notifyTypingActivity, stopTyping, leave } = useE2EEChat({
+  const {
+    status,
+    messages,
+    typingUsers,
+    error: chatError,
+    sendMessage,
+    sendImage,
+    notifyTypingActivity,
+    stopTyping,
+    leave,
+    storageBucket,
+  } = useE2EEChat({
     roomCode: props.roomCode,
     key: props.roomKey,
     myId: props.myId,
@@ -30,7 +44,10 @@ export function ChatView(props: {
   })
 
   const [text, setText] = useState("")
+  const [fileError, setFileError] = useState<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const fileErrorTimerRef = useRef<number | null>(null)
 
   const statusLabel = useMemo(() => {
     if (status === "connecting") return "Conectando…"
@@ -49,15 +66,52 @@ export function ChatView(props: {
     el.scrollTop = el.scrollHeight
   }, [messages.length])
 
+  useEffect(() => {
+    return () => {
+      if (fileErrorTimerRef.current) window.clearTimeout(fileErrorTimerRef.current)
+    }
+  }, [])
+
+  function showFileError(msg: string) {
+    setFileError(msg)
+    if (fileErrorTimerRef.current) window.clearTimeout(fileErrorTimerRef.current)
+    fileErrorTimerRef.current = window.setTimeout(() => setFileError(null), 4000)
+  }
+
   async function onSend() {
     await sendMessage(text)
     setText("")
+  }
+
+  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (fileInputRef.current) fileInputRef.current.value = ""
+    if (!file) return
+
+    if (!file.type.startsWith("image/")) {
+      showFileError("Arquivo inválido. Selecione uma imagem.")
+      return
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      showFileError(
+        `Imagem muito grande (${(file.size / 1024 / 1024).toFixed(2)}MB). Limite: 5MB.`,
+      )
+      return
+    }
+    try {
+      await sendImage(file)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Falha ao enviar imagem"
+      showFileError(message)
+    }
   }
 
   async function onLeave() {
     await leave()
     props.onLeave()
   }
+
+  const inputDisabled = status !== "connected"
 
   return (
     <Card className="flex h-full flex-col border-white/10 bg-neutral-950/50 backdrop-blur">
@@ -107,33 +161,83 @@ export function ChatView(props: {
               Sem mensagens ainda. Diga oi.
             </div>
           ) : (
-            messages.map(m => <MessageBubble key={m.id} message={m} />)
+            messages.map(m => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                roomKey={props.roomKey}
+                storageBucket={storageBucket}
+              />
+            ))
           )}
         </div>
 
         <div className="space-y-2">
           <TypingIndicator users={typingUsers} />
+          {chatError ? (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {chatError}
+            </div>
+          ) : null}
+          {fileError ? (
+            <div
+              className={cn(
+                "rounded-lg border px-3 py-2 text-xs",
+                "border-amber-500/30 bg-amber-500/10 text-amber-300",
+              )}
+            >
+              {fileError}
+            </div>
+          ) : null}
           <div className="flex items-end gap-2">
-            <Input
-              value={text}
-              onChange={e => {
-                setText(e.target.value)
-                notifyTypingActivity()
-              }}
-              onBlur={() => stopTyping()}
-              onKeyDown={e => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  onSend().catch(() => undefined)
-                }
-              }}
-              placeholder="Escreva uma mensagem…"
-              className="h-12 bg-neutral-950/60 text-neutral-50 caret-neutral-50 placeholder:text-neutral-400"
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={onFileChosen}
+              disabled={inputDisabled}
             />
-            <Button type="button" onClick={() => onSend().catch(() => undefined)} className="h-12">
-              <SendHorizonal />
-              Enviar
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={inputDisabled}
+              aria-label="Anexar imagem"
+              className="h-12 w-12 shrink-0"
+              title="Anexar imagem"
+            >
+              <ImagePlus />
             </Button>
+            <div className="flex min-w-0 flex-1 items-end gap-2">
+              <Input
+                value={text}
+                onChange={e => {
+                  setText(e.target.value)
+                  notifyTypingActivity()
+                }}
+                onBlur={() => stopTyping()}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    onSend().catch(() => undefined)
+                  }
+                }}
+                placeholder="Escreva uma mensagem…"
+                disabled={inputDisabled}
+                className="h-12 bg-neutral-950/60 text-neutral-50 caret-neutral-50 placeholder:text-neutral-400"
+              />
+              <Button
+                type="button"
+                onClick={() => onSend().catch(() => undefined)}
+                disabled={inputDisabled || !text.trim()}
+                className="h-12 shrink-0"
+              >
+                <SendHorizonal />
+                Enviar
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>

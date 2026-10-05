@@ -51,3 +51,8 @@ export type TypingUser = {
   senderId: string
   senderName: string
 }
+
+export type OnlineUser = {
+  senderId: string
+  senderName: string
+}

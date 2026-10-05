@@ -29,6 +29,7 @@ export function ChatView(props: {
     status,
     messages,
     typingUsers,
+    onlineUsers,
     error: chatError,
     sendMessage,
     sendImage,
@@ -136,6 +137,13 @@ export function ChatView(props: {
             <div className="mt-1.5 md:mt-2 flex flex-wrap items-center gap-1.5 md:gap-2">
               <Badge variant="outline" className="border-white/10 bg-white/5 text-neutral-200 text-[11px] md:text-xs px-2 md:px-2.5 py-0.5">
                 {statusLabel}
+              </Badge>
+              <Badge
+                variant="outline"
+                title={onlineUsers.length ? onlineUsers.map(u => u.senderName).join(", ") : undefined}
+                className="border-white/10 bg-white/5 text-neutral-200 text-[11px] md:text-xs px-2 md:px-2.5 py-0.5"
+              >
+                {onlineUsers.length} online
               </Badge>
               <Badge variant="outline" className="border-white/10 bg-white/5 text-neutral-200 text-[11px] md:text-xs px-2 md:px-2.5 py-0.5">
                 E2EE AES-GCM

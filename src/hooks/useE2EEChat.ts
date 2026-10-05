@@ -10,6 +10,7 @@ import type {
   ChatPlainImageMessage,
   ChatPlainMessage,
   ChatTypingPayload,
+  OnlineUser,
   TypingUser,
 } from "@/types/chat"
 
@@ -27,6 +28,7 @@ export function useE2EEChat(params: {
   const [status, setStatus] = useState<Status>("idle")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([])
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -36,6 +38,7 @@ export function useE2EEChat(params: {
   const typingIdleTimerRef = useRef<number | null>(null)
   const amITypingRef = useRef(false)
   const lastTypingPingAtRef = useRef(0)
+  const onlineRef = useRef<Map<string, { senderName: string }>>(new Map())
 
   const channelName = useMemo(() => `room:${params.roomCode}`, [params.roomCode])
   const typingTtlMs = 6_000
@@ -53,6 +56,15 @@ export function useE2EEChat(params: {
     next.sort((a, b) => a.senderName.localeCompare(b.senderName))
     setTypingUsers(next)
   }, [params.myId, typingTtlMs])
+
+  const syncOnlineState = useCallback(() => {
+    const next: OnlineUser[] = []
+    for (const [senderId, v] of onlineRef.current.entries()) {
+      next.push({ senderId, senderName: v.senderName })
+    }
+    next.sort((a, b) => a.senderName.localeCompare(b.senderName))
+    setOnlineUsers(next)
+  }, [])
 
   const scheduleTypingPrune = useCallback(() => {
     if (typingPruneTimerRef.current) window.clearInterval(typingPruneTimerRef.current)
@@ -161,82 +173,110 @@ export function useE2EEChat(params: {
       setError(null)
     })
 
-    const channel = supabase.channel(channelName)
+    const channel = supabase.channel(channelName, {
+      config: {
+        presence: {
+          key: params.myId,
+        },
+      },
+    })
     channelRef.current = channel
 
-    channel.on("broadcast", { event: "message" }, async ({ payload }) => {
-      try {
-        const text = await decrypt(params.key, payload as EncryptedPayload)
-        const parsed = JSON.parse(text) as ChatPlainMessage & { text?: string }
-        if (!active) return
-        if (!parsed?.id || !parsed?.senderId) return
+    channel
+      .on("broadcast", { event: "message" }, async ({ payload }) => {
+        try {
+          const text = await decrypt(params.key, payload as EncryptedPayload)
+          const parsed = JSON.parse(text) as ChatPlainMessage & { text?: string }
+          if (!active) return
+          if (!parsed?.id || !parsed?.senderId) return
 
-        const type: "text" | "image" = parsed.type === "image" ? "image" : "text"
+          const type: "text" | "image" = parsed.type === "image" ? "image" : "text"
 
-        if (type === "text") {
-          const msgText = typeof parsed.text === "string" ? parsed.text : ""
-          const normalized: ChatPlainMessage = {
-            id: parsed.id,
-            senderId: parsed.senderId,
-            senderName: parsed.senderName ?? "Anônimo",
-            sentAt: parsed.sentAt ?? Date.now(),
-            type: "text",
-            text: msgText,
+          if (type === "text") {
+            const msgText = typeof parsed.text === "string" ? parsed.text : ""
+            const normalized: ChatPlainMessage = {
+              id: parsed.id,
+              senderId: parsed.senderId,
+              senderName: parsed.senderName ?? "Anônimo",
+              sentAt: parsed.sentAt ?? Date.now(),
+              type: "text",
+              text: msgText,
+            }
+            appendMessage(normalized)
+          } else {
+            const img = (parsed as ChatPlainImageMessage).image
+            if (!img || typeof img.storageKey !== "string" || typeof img.iv !== "string") return
+            if (typeof img.mimeType !== "string" || typeof img.size !== "number") return
+            const normalized: ChatPlainImageMessage = {
+              id: parsed.id,
+              senderId: parsed.senderId,
+              senderName: parsed.senderName ?? "Anônimo",
+              sentAt: parsed.sentAt ?? Date.now(),
+              type: "image",
+              image: {
+                storageKey: img.storageKey,
+                iv: img.iv,
+                mimeType: img.mimeType,
+                size: img.size,
+                fileName: img.fileName,
+              },
+            }
+            appendMessage(normalized)
           }
-          appendMessage(normalized)
-        } else {
-          const img = (parsed as ChatPlainImageMessage).image
-          if (!img || typeof img.storageKey !== "string" || typeof img.iv !== "string") return
-          if (typeof img.mimeType !== "string" || typeof img.size !== "number") return
-          const normalized: ChatPlainImageMessage = {
-            id: parsed.id,
-            senderId: parsed.senderId,
-            senderName: parsed.senderName ?? "Anônimo",
-            sentAt: parsed.sentAt ?? Date.now(),
-            type: "image",
-            image: {
-              storageKey: img.storageKey,
-              iv: img.iv,
-              mimeType: img.mimeType,
-              size: img.size,
-              fileName: img.fileName,
-            },
+        } catch {
+          if (!active) return
+        }
+      })
+      .on("broadcast", { event: "typing" }, async ({ payload }) => {
+        try {
+          const text = await decrypt(params.key, payload as EncryptedPayload)
+          const parsed = JSON.parse(text) as ChatTypingPayload
+          if (!active) return
+          if (!parsed?.senderId || typeof parsed.senderName !== "string") return
+          if (typeof parsed.isTyping !== "boolean" || typeof parsed.sentAt !== "number") return
+          if (parsed.senderId === params.myId) return
+
+          if (parsed.isTyping) {
+            typingRef.current.set(parsed.senderId, { senderName: parsed.senderName, lastTypedAt: parsed.sentAt })
+          } else {
+            typingRef.current.delete(parsed.senderId)
           }
-          appendMessage(normalized)
+          syncTypingState()
+        } catch {
+          if (!active) return
         }
-      } catch {
+      })
+      .on("presence", { event: "sync" }, () => {
         if (!active) return
-      }
-    })
-
-    channel.on("broadcast", { event: "typing" }, async ({ payload }) => {
-      try {
-        const text = await decrypt(params.key, payload as EncryptedPayload)
-        const parsed = JSON.parse(text) as ChatTypingPayload
-        if (!active) return
-        if (!parsed?.senderId || typeof parsed.senderName !== "string") return
-        if (typeof parsed.isTyping !== "boolean" || typeof parsed.sentAt !== "number") return
-        if (parsed.senderId === params.myId) return
-
-        if (parsed.isTyping) {
-          typingRef.current.set(parsed.senderId, { senderName: parsed.senderName, lastTypedAt: parsed.sentAt })
-        } else {
-          typingRef.current.delete(parsed.senderId)
+        const state = channel.presenceState<{ senderId: string; senderName: string }>()
+        const next = new Map<string, { senderName: string }>()
+        for (const presences of Object.values(state)) {
+          for (const p of presences) {
+            if (!p?.senderId || typeof p.senderName !== "string") continue
+            next.set(p.senderId, { senderName: p.senderName })
+          }
         }
-        syncTypingState()
-      } catch {
+        onlineRef.current = next
+        syncOnlineState()
+      })
+      .subscribe(async status => {
         if (!active) return
-      }
-    })
-
-    channel.subscribe(status => {
-      if (!active) return
-      if (status === "SUBSCRIBED") setStatus("connected")
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        setStatus("error")
-        setError("Falha ao conectar no realtime")
-      }
-    })
+        if (status === "SUBSCRIBED") {
+          try {
+            await channel.track({
+              senderId: params.myId,
+              senderName: params.myName,
+            })
+          } catch {
+            // ignore track errors
+          }
+          setStatus("connected")
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setStatus("error")
+          setError("Falha ao conectar no realtime")
+        }
+      })
 
     return () => {
       active = false
@@ -246,14 +286,19 @@ export function useE2EEChat(params: {
       if (typingIdleTimerRef.current) window.clearTimeout(typingIdleTimerRef.current)
       typingPruneTimerRef.current = null
       typingIdleTimerRef.current = null
+      // Fire-and-forget: untrack + unsubscribe. Não esperamos para não
+      // travar o cleanup sincrono do React (StrictMode re-utiliza a montagem)
+      channel.untrack().catch(() => undefined)
       channel.unsubscribe().catch(() => undefined)
       channelRef.current = null
       seenRef.current = new Set()
       typingRef.current = new Map()
+      onlineRef.current = new Map()
       setMessages([])
       setTypingUsers([])
+      setOnlineUsers([])
     }
-  }, [appendMessage, channelName, params.key, params.myId, scheduleTypingPrune, stopTyping, syncTypingState])
+  }, [appendMessage, channelName, params.key, params.myId, params.myName, scheduleTypingPrune, stopTyping, syncOnlineState, syncTypingState])
 
   useEffect(() => {
     scheduleTypingPrune()
@@ -371,17 +416,25 @@ export function useE2EEChat(params: {
     const channel = channelRef.current
     if (!channel) return
     stopTyping()
+    try {
+      await channel.untrack()
+    } catch {
+      // ignore
+    }
     await channel.unsubscribe()
     channelRef.current = null
     setStatus("idle")
     setTypingUsers([])
+    setOnlineUsers([])
     typingRef.current = new Map()
+    onlineRef.current = new Map()
   }, [stopTyping])
 
   return {
     status,
     messages,
     typingUsers,
+    onlineUsers,
     error,
     sendMessage,
     sendImage,

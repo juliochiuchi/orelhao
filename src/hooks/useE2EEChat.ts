@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { decrypt, encrypt, type EncryptedPayload } from "@/crypto"
 import { compressImage, decryptBlob, encryptBlob } from "@/lib/image"
 import { randomId } from "@/lib/random"
+import {
+  insertRoomMessage,
+  listRoomMessagesAfter,
+} from "@/services/room-messages.service"
 import { supabase } from "@/supabase"
 import type {
   ChatLocalMessage,
@@ -45,6 +49,10 @@ export function useE2EEChat(params: {
   const typingIdleMs = 1_200
   const typingPingMs = 2_000
 
+  const lastReceivedSentAtMsRef = useRef<number>(0)
+  const catchUpRunningRef = useRef(false)
+  const hydratedRef = useRef(false)
+
   const syncTypingState = useCallback(() => {
     const now = Date.now()
     const next: TypingUser[] = []
@@ -77,6 +85,9 @@ export function useE2EEChat(params: {
     (plain: ChatLocalMessage) => {
       if (seenRef.current.has(plain.id)) return
       seenRef.current.add(plain.id)
+      if (plain.sentAt > lastReceivedSentAtMsRef.current) {
+        lastReceivedSentAtMsRef.current = plain.sentAt
+      }
       setMessages(prev => [
         ...prev,
         {
@@ -87,6 +98,72 @@ export function useE2EEChat(params: {
     },
     [params.myId],
   )
+
+  const processEncryptedPayload = useCallback(
+    async (payload: EncryptedPayload) => {
+      const text = await decrypt(params.key, payload)
+      const parsed = JSON.parse(text) as ChatPlainMessage & { text?: string }
+      if (!parsed?.id || !parsed?.senderId) return
+
+      const type: "text" | "image" = parsed.type === "image" ? "image" : "text"
+
+      if (type === "text") {
+        const msgText = typeof parsed.text === "string" ? parsed.text : ""
+        const normalized: ChatPlainMessage = {
+          id: parsed.id,
+          senderId: parsed.senderId,
+          senderName: parsed.senderName ?? "Anônimo",
+          sentAt: parsed.sentAt ?? Date.now(),
+          type: "text",
+          text: msgText,
+        }
+        appendMessage(normalized)
+      } else {
+        const img = (parsed as ChatPlainImageMessage).image
+        if (!img || typeof img.storageKey !== "string" || typeof img.iv !== "string") return
+        if (typeof img.mimeType !== "string" || typeof img.size !== "number") return
+        const normalized: ChatPlainImageMessage = {
+          id: parsed.id,
+          senderId: parsed.senderId,
+          senderName: parsed.senderName ?? "Anônimo",
+          sentAt: parsed.sentAt ?? Date.now(),
+          type: "image",
+          image: {
+            storageKey: img.storageKey,
+            iv: img.iv,
+            mimeType: img.mimeType,
+            size: img.size,
+            fileName: img.fileName,
+          },
+        }
+        appendMessage(normalized)
+      }
+    },
+    [appendMessage, params.key],
+  )
+
+  const catchUpMessages = useCallback(async () => {
+    if (catchUpRunningRef.current) return
+    const ch = channelRef.current
+    if (!ch) return
+    catchUpRunningRef.current = true
+    try {
+      const sinceMs = lastReceivedSentAtMsRef.current
+      const rows = await listRoomMessagesAfter(params.roomCode, sinceMs)
+      for (const row of rows) {
+        if (seenRef.current.has(row.message_id)) continue
+        try {
+          await processEncryptedPayload(row.encrypted_payload)
+        } catch {
+          // ignore individual decryption failures
+        }
+      }
+    } catch {
+      // ignore catch-up failures; next sync retries
+    } finally {
+      catchUpRunningRef.current = false
+    }
+  }, [params.roomCode, processEncryptedPayload])
 
   const removeMessage = useCallback((id: string) => {
     setMessages(prev => prev.filter(m => m.id !== id))
@@ -156,13 +233,20 @@ export function useE2EEChat(params: {
       const channel = channelRef.current
       if (!channel) return
       const payload = await encrypt(params.key, JSON.stringify(plain))
+      await insertRoomMessage({
+        roomCode: params.roomCode,
+        messageId: plain.id,
+        senderId: plain.senderId,
+        encryptedPayload: payload,
+        sentAt: plain.sentAt,
+      }).catch(() => undefined)
       await channel.send({
         type: "broadcast",
         event: "message",
         payload,
       })
     },
-    [params.key],
+    [params.key, params.roomCode],
   )
 
   useEffect(() => {
@@ -184,47 +268,11 @@ export function useE2EEChat(params: {
 
     channel
       .on("broadcast", { event: "message" }, async ({ payload }) => {
+        if (!active) return
         try {
-          const text = await decrypt(params.key, payload as EncryptedPayload)
-          const parsed = JSON.parse(text) as ChatPlainMessage & { text?: string }
-          if (!active) return
-          if (!parsed?.id || !parsed?.senderId) return
-
-          const type: "text" | "image" = parsed.type === "image" ? "image" : "text"
-
-          if (type === "text") {
-            const msgText = typeof parsed.text === "string" ? parsed.text : ""
-            const normalized: ChatPlainMessage = {
-              id: parsed.id,
-              senderId: parsed.senderId,
-              senderName: parsed.senderName ?? "Anônimo",
-              sentAt: parsed.sentAt ?? Date.now(),
-              type: "text",
-              text: msgText,
-            }
-            appendMessage(normalized)
-          } else {
-            const img = (parsed as ChatPlainImageMessage).image
-            if (!img || typeof img.storageKey !== "string" || typeof img.iv !== "string") return
-            if (typeof img.mimeType !== "string" || typeof img.size !== "number") return
-            const normalized: ChatPlainImageMessage = {
-              id: parsed.id,
-              senderId: parsed.senderId,
-              senderName: parsed.senderName ?? "Anônimo",
-              sentAt: parsed.sentAt ?? Date.now(),
-              type: "image",
-              image: {
-                storageKey: img.storageKey,
-                iv: img.iv,
-                mimeType: img.mimeType,
-                size: img.size,
-                fileName: img.fileName,
-              },
-            }
-            appendMessage(normalized)
-          }
+          await processEncryptedPayload(payload as EncryptedPayload)
         } catch {
-          if (!active) return
+          // ignore invalid broadcast payloads
         }
       })
       .on("broadcast", { event: "typing" }, async ({ payload }) => {
@@ -259,9 +307,9 @@ export function useE2EEChat(params: {
         onlineRef.current = next
         syncOnlineState()
       })
-      .subscribe(async status => {
+      .subscribe(async nextStatus => {
         if (!active) return
-        if (status === "SUBSCRIBED") {
+        if (nextStatus === "SUBSCRIBED") {
           try {
             await channel.track({
               senderId: params.myId,
@@ -271,12 +319,34 @@ export function useE2EEChat(params: {
             // ignore track errors
           }
           setStatus("connected")
+          setError(null)
+          if (!hydratedRef.current) {
+            hydratedRef.current = true
+          }
+          catchUpMessages().catch(() => undefined)
         }
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setStatus("error")
-          setError("Falha ao conectar no realtime")
+        if (nextStatus === "CHANNEL_ERROR" || nextStatus === "TIMED_OUT") {
+          setStatus("connecting")
+          setError(null)
         }
       })
+
+    function onVisibilityOrOnline() {
+      if (!active) return
+      if (typeof document !== "undefined" && document.hidden) return
+      catchUpMessages().catch(() => undefined)
+      const ch = channelRef.current
+      if (ch) {
+        ch.subscribe()
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", onVisibilityOrOnline)
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityOrOnline)
+    }
 
     return () => {
       active = false
@@ -286,19 +356,27 @@ export function useE2EEChat(params: {
       if (typingIdleTimerRef.current) window.clearTimeout(typingIdleTimerRef.current)
       typingPruneTimerRef.current = null
       typingIdleTimerRef.current = null
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", onVisibilityOrOnline)
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityOrOnline)
+      }
       // Fire-and-forget: untrack + unsubscribe. Não esperamos para não
       // travar o cleanup sincrono do React (StrictMode re-utiliza a montagem)
       channel.untrack().catch(() => undefined)
       channel.unsubscribe().catch(() => undefined)
       channelRef.current = null
+      hydratedRef.current = false
       seenRef.current = new Set()
       typingRef.current = new Map()
       onlineRef.current = new Map()
+      lastReceivedSentAtMsRef.current = 0
       setMessages([])
       setTypingUsers([])
       setOnlineUsers([])
     }
-  }, [appendMessage, channelName, params.key, params.myId, params.myName, scheduleTypingPrune, stopTyping, syncOnlineState, syncTypingState])
+  }, [appendMessage, catchUpMessages, channelName, params.key, params.myId, params.myName, processEncryptedPayload, scheduleTypingPrune, stopTyping, syncOnlineState, syncTypingState])
 
   useEffect(() => {
     scheduleTypingPrune()
